@@ -227,6 +227,10 @@ int opt_cpucount(void *optctx, const char *opt, const char *arg);
     { "cpuflags",     OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT, { .func_arg = opt_cpuflags },     "force specific cpu flags", "flags" },     \
     { "cpucount",     OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT, { .func_arg = opt_cpucount },     "force specific cpu count", "count" },     \
     { "hide_banner",  OPT_TYPE_BOOL, OPT_EXPERT,            {&hide_banner},                   "do not show program banner", "hide_banner" }, \
+    { "rotate_log",              OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_log},                   "enable log rotation", "rotate_log" }, \
+    { "rotate_by_period",        OPT_TYPE_INT,  OPT_EXPERT,            {&rotate_by_period},             "rotate log files by period (in seconds)", "seconds" }, \
+    { "rotate_by_date",          OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_by_date},               "rotate log files daily at midnight", "rotate_by_date" }, \
+    { "rotate_on_filesize_limit",OPT_TYPE_INT64,OPT_EXPERT,            {&rotate_on_filesize_limit},     "rotate log files by filesize limit (in bytes)", "bytes" }, \
     CMDUTILS_COMMON_OPTIONS_AVDEVICE                                                                                    \
 
 #endif /* FFTOOLS_OPT_COMMON_H */

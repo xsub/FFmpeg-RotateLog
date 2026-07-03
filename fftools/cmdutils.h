@@ -48,6 +48,11 @@ extern AVDictionary *sws_dict;
 extern AVDictionary *swr_opts;
 extern AVDictionary *format_opts, *codec_opts;
 extern int hide_banner;
+extern int rotate_log;
+extern int rotate_by_period;
+extern int rotate_by_date;
+extern int64_t rotate_on_filesize_limit;
+
 
 /**
  * Initialize dynamic library loading

@@ -76,6 +76,12 @@ enum show_codec {
 static FILE *report_file;
 static int report_file_level = AV_LOG_DEBUG;
 
+// Log rotation state
+static int64_t current_log_size = 0;
+static time_t current_log_start_time = 0;
+static int current_log_file_index = 0;
+static char *current_log_filename_template = NULL;
+
 int show_license(void *optctx, const char *opt, const char *arg)
 {
 #if CONFIG_NONFREE
@@ -1150,9 +1156,72 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
     av_log_default_callback(ptr, level, fmt, vl);
     av_log_format_line(ptr, level, fmt, vl2, line, sizeof(line), &print_prefix);
     va_end(vl2);
+    
     if (report_file_level >= level) {
-        fputs(line, report_file);
-        fflush(report_file);
+        int len = strlen(line);
+        
+        if (rotate_log && report_file) {
+            int should_rotate = 0;
+            time_t now;
+            time(&now);
+            
+            if (rotate_on_filesize_limit > 0 && current_log_size + len >= rotate_on_filesize_limit) {
+                should_rotate = 1;
+            }
+            if (!should_rotate && rotate_by_period > 0 && now - current_log_start_time >= rotate_by_period) {
+                should_rotate = 1;
+            }
+            if (!should_rotate && rotate_by_date) {
+                struct tm *tm_start = localtime(&current_log_start_time);
+                int start_day = tm_start->tm_yday;
+                int start_year = tm_start->tm_year;
+                struct tm *tm_now = localtime(&now);
+                if (tm_now->tm_yday != start_day || tm_now->tm_year != start_year) {
+                    should_rotate = 1;
+                }
+            }
+            
+            if (should_rotate) {
+                AVBPrint filename;
+                struct tm *tm = localtime(&now);
+                char template_with_idx[1024];
+                
+                fclose(report_file);
+                
+                current_log_file_index++;
+                current_log_start_time = now;
+                current_log_size = 0;
+                
+                // If there's an extension, insert index before it. Otherwise just append.
+                if (current_log_filename_template) {
+                    char *dot = strrchr(current_log_filename_template, '.');
+                    if (dot) {
+                        int pos = dot - current_log_filename_template;
+                        snprintf(template_with_idx, sizeof(template_with_idx), "%.*s-%d%s", 
+                                 pos, current_log_filename_template, current_log_file_index, dot);
+                    } else {
+                        snprintf(template_with_idx, sizeof(template_with_idx), "%s-%d.log", 
+                                 current_log_filename_template, current_log_file_index);
+                    }
+                } else {
+                    snprintf(template_with_idx, sizeof(template_with_idx), "%%p-%%t-%d.log", current_log_file_index);
+                }
+                
+                av_bprint_init(&filename, 0, AV_BPRINT_SIZE_AUTOMATIC);
+                expand_filename_template(&filename, template_with_idx, tm);
+                
+                report_file = fopen_utf8(filename.str, "w");
+                av_bprint_finalize(&filename, NULL);
+            }
+        }
+        
+        if (report_file) {
+            fputs(line, report_file);
+            fflush(report_file);
+            if (rotate_log) {
+                current_log_size += len;
+            }
+        }
     }
 }
 
@@ -1202,6 +1271,13 @@ int init_report(const char *env, FILE **file)
         }
         av_free(val);
         av_free(key);
+    }
+
+    if (rotate_log) {
+        current_log_filename_template = av_strdup(av_x_if_null(filename_template, "%p-%t.log"));
+        current_log_start_time = now;
+        current_log_file_index = 0;
+        current_log_size = 0;
     }
 
     av_bprint_init(&filename, 0, AV_BPRINT_SIZE_AUTOMATIC);

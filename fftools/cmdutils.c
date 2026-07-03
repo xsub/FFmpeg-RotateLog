@@ -58,6 +58,11 @@ AVDictionary *swr_opts;
 AVDictionary *format_opts, *codec_opts;
 
 int hide_banner = 0;
+int rotate_log = 0;
+int rotate_by_period = 0;
+int rotate_by_date = 0;
+int64_t rotate_on_filesize_limit = 0;
+
 
 void uninit_opts(void)
 {
@@ -565,6 +570,19 @@ void parse_loglevel(int argc, char **argv, const OptionDef *options)
         idx = locate_option(argc, argv, options, "v");
     if (idx && argv[idx + 1])
         opt_loglevel(NULL, "loglevel", argv[idx + 1]);
+    idx = locate_option(argc, argv, options, "rotate_log");
+    if (idx)
+        rotate_log = 1;
+    idx = locate_option(argc, argv, options, "rotate_by_period");
+    if (idx && argv[idx + 1])
+        rotate_by_period = atoi(argv[idx + 1]);
+    idx = locate_option(argc, argv, options, "rotate_by_date");
+    if (idx)
+        rotate_by_date = 1;
+    idx = locate_option(argc, argv, options, "rotate_on_filesize_limit");
+    if (idx && argv[idx + 1])
+        rotate_on_filesize_limit = atoll(argv[idx + 1]);
+
     idx = locate_option(argc, argv, options, "report");
     env = getenv_utf8("FFREPORT");
     if (env || idx) {
