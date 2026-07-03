@@ -1185,12 +1185,9 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
                 AVBPrint filename;
                 struct tm *tm = localtime(&now);
                 char template_with_idx[1024];
-                
-                fclose(report_file);
+                FILE *new_report_file = NULL;
                 
                 current_log_file_index++;
-                current_log_start_time = now;
-                current_log_size = 0;
                 
                 // If there's an extension, insert index before it. Otherwise just append.
                 if (current_log_filename_template) {
@@ -1210,8 +1207,21 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
                 av_bprint_init(&filename, 0, AV_BPRINT_SIZE_AUTOMATIC);
                 expand_filename_template(&filename, template_with_idx, tm);
                 
-                report_file = fopen_utf8(filename.str, "w");
+                // Open new file FIRST
+                new_report_file = fopen_utf8(filename.str, "w");
                 av_bprint_finalize(&filename, NULL);
+                
+                // Then close old file and swap
+                if (new_report_file) {
+                    fclose(report_file);
+                    report_file = new_report_file;
+                    current_log_start_time = now;
+                    current_log_size = 0;
+                } else {
+                    // Fallback if we couldn't open the new file (permissions, etc.)
+                    // Revert the index and continue using the old file to not lose logs.
+                    current_log_file_index--;
+                }
             }
         }
         
