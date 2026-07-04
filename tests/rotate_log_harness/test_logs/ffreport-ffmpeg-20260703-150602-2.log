@@ -1,0 +1,23 @@
+frame=  114 fps= 28 q=-0.0 size=N/A time=00:00:04.56 bitrate=N/A speed=1.13x elapsed=0:00:04.02    frame=  126 fps= 28 q=-0.0 size=N/A time=00:00:05.04 bitrate=N/A speed=1.11x elapsed=0:00:04.53    frame=  139 fps= 28 q=-0.0 size=N/A time=00:00:05.56 bitrate=N/A speed= 1.1x elapsed=0:00:05.03    [in#0/lavfi @ 0x153704580] EOF while reading input
+[in#0/lavfi @ 0x153704580] Terminating thread with return code 0 (success)
+[vist#0:0/wrapped_avframe @ 0x153614450] [dec:wrapped_avframe @ 0x1536169d0] Decoder thread received EOF packet
+[vist#0:0/wrapped_avframe @ 0x153614450] [dec:wrapped_avframe @ 0x1536169d0] Decoder returned EOF, finishing
+[vist#0:0/wrapped_avframe @ 0x153614450] [dec:wrapped_avframe @ 0x1536169d0] Terminating thread with return code 0 (success)
+[vost#0:0/wrapped_avframe @ 0x153615990] [enc:wrapped_avframe @ 0x153616090] Encoder thread received EOF
+[out_#0:0 @ 0x143704630] EOF on sink link out_#0:0:default.
+[vf#0:0 @ 0x15380a400] Filtergraph returned EOF, finishing
+[vf#0:0 @ 0x15380a400] All consumers returned EOF
+[vost#0:0/wrapped_avframe @ 0x153615990] Terminating thread with return code 0 (success)
+[out#0/null @ 0x153614680] All streams finished
+[out#0/null @ 0x153614680] Terminating thread with return code 0 (success)
+[vf#0:0 @ 0x15380a400] Terminating thread with return code 0 (success)
+[out#0/null @ 0x153614680] Output file #0 (pipe:):
+[out#0/null @ 0x153614680]   Output stream #0:0 (video): 150 frames encoded; 150 packets muxed (63600 bytes); 
+[out#0/null @ 0x153614680]   Total: 150 packets (63600 bytes) muxed
+[out#0/null @ 0x153614680] video:62KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=  150 fps= 27 q=-0.0 Lsize=N/A time=00:00:06.00 bitrate=N/A speed= 1.1x elapsed=0:00:05.46    
+[in#0/lavfi @ 0x153704580] Input file #0 (testsrc=duration=6):
+[in#0/lavfi @ 0x153704580]   Input stream #0:0 (video): 150 packets read (63600 bytes); 150 frames decoded; 0 decode errors; 
+[in#0/lavfi @ 0x153704580]   Total: 150 packets (63600 bytes) demuxed
+
+Exiting with exit code 0

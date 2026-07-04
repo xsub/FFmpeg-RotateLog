@@ -1,0 +1,66 @@
+ffmpeg started on 2026-07-03 at 15:05:58
+Report written to "test_logs/ffreport-ffmpeg-20260703-150558.log"
+Log level: 48
+Command line:
+../../ffmpeg -re -rotate_log -rotate_by_period 2 -f lavfi -i "testsrc=duration=6" -f null -
+ffmpeg version git-2026-07-02-1836ef9684 Copyright (c) 2000-2026 the FFmpeg developers
+  built with Apple clang version 17.0.0 (clang-1700.6.3.2)
+  configuration: --disable-x86asm
+  libavutil      61.  2.100 / 61.  2.100
+  libavcodec     63.  3.100 / 63.  3.100
+  libavformat    63.  3.100 / 63.  3.100
+  libavdevice    63.  2.100 / 63.  2.100
+  libavfilter    12.  2.100 / 12.  2.100
+  libswscale     10.  2.100 / 10.  2.100
+  libswresample   7.  2.100 /  7.  2.100
+Splitting the commandline.
+Reading option '-re' ... matched as option 're' (read input at native frame rate; equivalent to -readrate 1) with argument '1'.
+Reading option '-rotate_log' ... matched as option 'rotate_log' (enable log rotation) with argument '1'.
+Reading option '-rotate_by_period' ... matched as option 'rotate_by_period' (rotate log files by period (in seconds)) with argument '2'.
+Reading option '-f' ... matched as option 'f' (force container format (auto-detected otherwise)) with argument 'lavfi'.
+Reading option '-i' ... matched as input url with argument 'testsrc=duration=6'.
+Reading option '-f' ... matched as option 'f' (force container format (auto-detected otherwise)) with argument 'null'.
+Reading option '-' ... matched as output url.
+Finished splitting the commandline.
+Parsing a group of options: global .
+Applying option rotate_log (enable log rotation) with argument 1.
+Applying option rotate_by_period (rotate log files by period (in seconds)) with argument 2.
+Successfully parsed a group of options.
+Parsing a group of options: input url testsrc=duration=6.
+Applying option re (read input at native frame rate; equivalent to -readrate 1) with argument 1.
+Applying option f (force container format (auto-detected otherwise)) with argument lavfi.
+Successfully parsed a group of options.
+Opening an input file: testsrc=duration=6.
+[AVFilterGraph @ 0x153704ce0] Setting 'duration' to value '6'
+detected 11 logical cores
+[Parsed_testsrc_0 @ 0x153613bf0] size:320x240 rate:25/1 duration:6.000000 sar:1/1
+[AVFilterGraph @ 0x153704ce0] query_formats: 2 queried, 4 merged, 0 already done, 0 delayed
+[in#0/lavfi @ 0x153704800] All info found
+Input #0, lavfi, from 'testsrc=duration=6':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0, 1, 1/25: Video: wrapped_avframe, rgb24, 320x240 [SAR 1:1 DAR 4:3], 25 fps, 25 tbr, 25 tbn
+Successfully opened the file.
+Parsing a group of options: output url -.
+Applying option f (force container format (auto-detected otherwise)) with argument null.
+Successfully parsed a group of options.
+Opening an output file: -.
+[out#0/null @ 0x153614680] No explicit maps, mapping streams automatically...
+[vost#0:0/wrapped_avframe @ 0x153615990] Created video stream from input stream 0:0
+Successfully opened the file.
+Stream mapping:
+  Stream #0:0 -> #0:0 (wrapped_avframe (native) -> wrapped_avframe (native))
+[vost#0:0/wrapped_avframe @ 0x153615990] Starting thread...
+[vf#0:0 @ 0x15380a400] Starting thread...
+[vist#0:0/wrapped_avframe @ 0x153614450] [dec:wrapped_avframe @ 0x1536169d0] Starting thread...
+[in#0/lavfi @ 0x153704580] Starting thread...
+Press [q] to stop, [?] for help
+[graph -1 input from stream 0:0 @ 0x143704280] w:320 h:240 pixfmt:rgb24 tb:1/25 fr:25/1 sar:1/1 csp:gbr range:pc alpha:unspecified
+[AVFilterGraph @ 0x153614bf0] query_formats: 3 queried, 8 merged, 0 already done, 0 delayed
+Output #0, null, to 'pipe:':
+  Metadata:
+    encoder         : Lavf63.3.100
+  Stream #0:0, 0, 1/25: Video: wrapped_avframe, rgb24(pc, gbr/unknown/unknown, progressive), 320x240 [SAR 1:1 DAR 4:3], q=2-31, 200 kb/s, 25 fps, 25 tbn
+    Metadata:
+      encoder         : Lavc63.3.100 wrapped_avframe
+[out#0/null @ 0x153614680] Starting thread...
+frame=   26 fps=0.0 q=-0.0 size=N/A time=00:00:01.04 bitrate=N/A speed=2.06x elapsed=0:00:00.50    frame=   38 fps= 38 q=-0.0 size=N/A time=00:00:01.52 bitrate=N/A speed=1.51x elapsed=0:00:01.00    frame=   51 fps= 34 q=-0.0 size=N/A time=00:00:02.04 bitrate=N/A speed=1.35x elapsed=0:00:01.51    

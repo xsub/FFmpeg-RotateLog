@@ -1,0 +1,100 @@
+From 7ed5967ddd55b88ea8f09269711d1c32d8baaa93 Mon Sep 17 00:00:00 2001
+From: Pawel Suchanecki <subdcc@gmail.com>
+Date: Fri, 3 Jul 2026 15:06:20 +0200
+Subject: [PATCH 2/2] refactor: Open new log file before closing the old one
+ during log rotation
+
+---
+ fftools/cmdutils.c   |  8 ++++----
+ fftools/opt_common.c | 20 +++++++++++++++-----
+ fftools/opt_common.h |  8 ++++----
+ 3 files changed, 23 insertions(+), 13 deletions(-)
+
+diff --git a/fftools/cmdutils.c b/fftools/cmdutils.c
+index f348b4d550..f70d875344 100644
+--- a/fftools/cmdutils.c
++++ b/fftools/cmdutils.c
+@@ -570,16 +570,16 @@ void parse_loglevel(int argc, char **argv, const OptionDef *options)
+         idx = locate_option(argc, argv, options, "v");
+     if (idx && argv[idx + 1])
+         opt_loglevel(NULL, "loglevel", argv[idx + 1]);
+-    idx = locate_option(argc, argv, options, "rotate_log");
++    idx = locate_option(argc, argv, options, "rotate-log");
+     if (idx)
+         rotate_log = 1;
+-    idx = locate_option(argc, argv, options, "rotate_by_period");
++    idx = locate_option(argc, argv, options, "rotate-by-period");
+     if (idx && argv[idx + 1])
+         rotate_by_period = atoi(argv[idx + 1]);
+-    idx = locate_option(argc, argv, options, "rotate_by_date");
++    idx = locate_option(argc, argv, options, "rotate-by-date");
+     if (idx)
+         rotate_by_date = 1;
+-    idx = locate_option(argc, argv, options, "rotate_on_filesize_limit");
++    idx = locate_option(argc, argv, options, "rotate-on-filesize-limit");
+     if (idx && argv[idx + 1])
+         rotate_on_filesize_limit = atoll(argv[idx + 1]);
+ 
+diff --git a/fftools/opt_common.c b/fftools/opt_common.c
+index 0a22561cfc..2373f265e3 100644
+--- a/fftools/opt_common.c
++++ b/fftools/opt_common.c
+@@ -1185,12 +1185,9 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
+                 AVBPrint filename;
+                 struct tm *tm = localtime(&now);
+                 char template_with_idx[1024];
+-                
+-                fclose(report_file);
++                FILE *new_report_file = NULL;
+                 
+                 current_log_file_index++;
+-                current_log_start_time = now;
+-                current_log_size = 0;
+                 
+                 // If there's an extension, insert index before it. Otherwise just append.
+                 if (current_log_filename_template) {
+@@ -1210,8 +1207,21 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
+                 av_bprint_init(&filename, 0, AV_BPRINT_SIZE_AUTOMATIC);
+                 expand_filename_template(&filename, template_with_idx, tm);
+                 
+-                report_file = fopen_utf8(filename.str, "w");
++                // Open new file FIRST
++                new_report_file = fopen_utf8(filename.str, "w");
+                 av_bprint_finalize(&filename, NULL);
++                
++                // Then close old file and swap
++                if (new_report_file) {
++                    fclose(report_file);
++                    report_file = new_report_file;
++                    current_log_start_time = now;
++                    current_log_size = 0;
++                } else {
++                    // Fallback if we couldn't open the new file (permissions, etc.)
++                    // Revert the index and continue using the old file to not lose logs.
++                    current_log_file_index--;
++                }
+             }
+         }
+         
+diff --git a/fftools/opt_common.h b/fftools/opt_common.h
+index 29b8d7851d..9e4a2bbd80 100644
+--- a/fftools/opt_common.h
++++ b/fftools/opt_common.h
+@@ -227,10 +227,10 @@ int opt_cpucount(void *optctx, const char *opt, const char *arg);
+     { "cpuflags",     OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT, { .func_arg = opt_cpuflags },     "force specific cpu flags", "flags" },     \
+     { "cpucount",     OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT, { .func_arg = opt_cpucount },     "force specific cpu count", "count" },     \
+     { "hide_banner",  OPT_TYPE_BOOL, OPT_EXPERT,            {&hide_banner},                   "do not show program banner", "hide_banner" }, \
+-    { "rotate_log",              OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_log},                   "enable log rotation", "rotate_log" }, \
+-    { "rotate_by_period",        OPT_TYPE_INT,  OPT_EXPERT,            {&rotate_by_period},             "rotate log files by period (in seconds)", "seconds" }, \
+-    { "rotate_by_date",          OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_by_date},               "rotate log files daily at midnight", "rotate_by_date" }, \
+-    { "rotate_on_filesize_limit",OPT_TYPE_INT64,OPT_EXPERT,            {&rotate_on_filesize_limit},     "rotate log files by filesize limit (in bytes)", "bytes" }, \
++    { "rotate-log",              OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_log},                   "enable log rotation", "rotate-log" }, \
++    { "rotate-by-period",        OPT_TYPE_INT,  OPT_EXPERT,            {&rotate_by_period},             "rotate log files by period (in seconds)", "seconds" }, \
++    { "rotate-by-date",          OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_by_date},               "rotate log files daily at midnight", "rotate-by-date" }, \
++    { "rotate-on-filesize-limit",OPT_TYPE_INT64,OPT_EXPERT,            {&rotate_on_filesize_limit},     "rotate log files by filesize limit (in bytes)", "bytes" }, \
+     CMDUTILS_COMMON_OPTIONS_AVDEVICE                                                                                    \
+ 
+ #endif /* FFTOOLS_OPT_COMMON_H */
+-- 
+2.50.1 (Apple Git-155)
+

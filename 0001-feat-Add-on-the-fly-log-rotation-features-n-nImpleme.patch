@@ -1,0 +1,405 @@
+From 4f1b71f0ae0634c67913170166c746e62fb98795 Mon Sep 17 00:00:00 2001
+From: Pawel Suchanecki <subdcc@gmail.com>
+Date: Fri, 3 Jul 2026 13:28:08 +0200
+Subject: [PATCH 1/2] feat: Add on-the-fly log rotation features\n\nImplemented
+ --rotate-log, --rotate-by-period, --rotate-by-date, and
+ --rotate-on-filesize-limit options. Added test harness in
+ tests/rotate_log_harness/.
+
+---
+ fftools/cmdutils.c                            | 18 ++++
+ fftools/cmdutils.h                            |  5 ++
+ fftools/opt_common.c                          | 80 ++++++++++++++++-
+ fftools/opt_common.h                          |  4 +
+ tests/rotate_log_harness/harness_runner.py    | 90 +++++++++++++++++++
+ .../ffreport-ffmpeg-20260703-132555.log       | 66 ++++++++++++++
+ .../ffreport-ffmpeg-20260703-132557-1.log     |  1 +
+ .../ffreport-ffmpeg-20260703-132559-2.log     | 23 +++++
+ 8 files changed, 285 insertions(+), 2 deletions(-)
+ create mode 100755 tests/rotate_log_harness/harness_runner.py
+ create mode 100644 tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132555.log
+ create mode 100644 tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132557-1.log
+ create mode 100644 tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132559-2.log
+
+diff --git a/fftools/cmdutils.c b/fftools/cmdutils.c
+index 9fdd680448..f348b4d550 100644
+--- a/fftools/cmdutils.c
++++ b/fftools/cmdutils.c
+@@ -58,6 +58,11 @@ AVDictionary *swr_opts;
+ AVDictionary *format_opts, *codec_opts;
+ 
+ int hide_banner = 0;
++int rotate_log = 0;
++int rotate_by_period = 0;
++int rotate_by_date = 0;
++int64_t rotate_on_filesize_limit = 0;
++
+ 
+ void uninit_opts(void)
+ {
+@@ -565,6 +570,19 @@ void parse_loglevel(int argc, char **argv, const OptionDef *options)
+         idx = locate_option(argc, argv, options, "v");
+     if (idx && argv[idx + 1])
+         opt_loglevel(NULL, "loglevel", argv[idx + 1]);
++    idx = locate_option(argc, argv, options, "rotate_log");
++    if (idx)
++        rotate_log = 1;
++    idx = locate_option(argc, argv, options, "rotate_by_period");
++    if (idx && argv[idx + 1])
++        rotate_by_period = atoi(argv[idx + 1]);
++    idx = locate_option(argc, argv, options, "rotate_by_date");
++    if (idx)
++        rotate_by_date = 1;
++    idx = locate_option(argc, argv, options, "rotate_on_filesize_limit");
++    if (idx && argv[idx + 1])
++        rotate_on_filesize_limit = atoll(argv[idx + 1]);
++
+     idx = locate_option(argc, argv, options, "report");
+     env = getenv_utf8("FFREPORT");
+     if (env || idx) {
+diff --git a/fftools/cmdutils.h b/fftools/cmdutils.h
+index 85b468f2af..30ed970fa1 100644
+--- a/fftools/cmdutils.h
++++ b/fftools/cmdutils.h
+@@ -48,6 +48,11 @@ extern AVDictionary *sws_dict;
+ extern AVDictionary *swr_opts;
+ extern AVDictionary *format_opts, *codec_opts;
+ extern int hide_banner;
++extern int rotate_log;
++extern int rotate_by_period;
++extern int rotate_by_date;
++extern int64_t rotate_on_filesize_limit;
++
+ 
+ /**
+  * Initialize dynamic library loading
+diff --git a/fftools/opt_common.c b/fftools/opt_common.c
+index 82b3cf2464..0a22561cfc 100644
+--- a/fftools/opt_common.c
++++ b/fftools/opt_common.c
+@@ -76,6 +76,12 @@ enum show_codec {
+ static FILE *report_file;
+ static int report_file_level = AV_LOG_DEBUG;
+ 
++// Log rotation state
++static int64_t current_log_size = 0;
++static time_t current_log_start_time = 0;
++static int current_log_file_index = 0;
++static char *current_log_filename_template = NULL;
++
+ int show_license(void *optctx, const char *opt, const char *arg)
+ {
+ #if CONFIG_NONFREE
+@@ -1150,9 +1156,72 @@ static void log_callback_report(void *ptr, int level, const char *fmt, va_list v
+     av_log_default_callback(ptr, level, fmt, vl);
+     av_log_format_line(ptr, level, fmt, vl2, line, sizeof(line), &print_prefix);
+     va_end(vl2);
++    
+     if (report_file_level >= level) {
+-        fputs(line, report_file);
+-        fflush(report_file);
++        int len = strlen(line);
++        
++        if (rotate_log && report_file) {
++            int should_rotate = 0;
++            time_t now;
++            time(&now);
++            
++            if (rotate_on_filesize_limit > 0 && current_log_size + len >= rotate_on_filesize_limit) {
++                should_rotate = 1;
++            }
++            if (!should_rotate && rotate_by_period > 0 && now - current_log_start_time >= rotate_by_period) {
++                should_rotate = 1;
++            }
++            if (!should_rotate && rotate_by_date) {
++                struct tm *tm_start = localtime(&current_log_start_time);
++                int start_day = tm_start->tm_yday;
++                int start_year = tm_start->tm_year;
++                struct tm *tm_now = localtime(&now);
++                if (tm_now->tm_yday != start_day || tm_now->tm_year != start_year) {
++                    should_rotate = 1;
++                }
++            }
++            
++            if (should_rotate) {
++                AVBPrint filename;
++                struct tm *tm = localtime(&now);
++                char template_with_idx[1024];
++                
++                fclose(report_file);
++                
++                current_log_file_index++;
++                current_log_start_time = now;
++                current_log_size = 0;
++                
++                // If there's an extension, insert index before it. Otherwise just append.
++                if (current_log_filename_template) {
++                    char *dot = strrchr(current_log_filename_template, '.');
++                    if (dot) {
++                        int pos = dot - current_log_filename_template;
++                        snprintf(template_with_idx, sizeof(template_with_idx), "%.*s-%d%s", 
++                                 pos, current_log_filename_template, current_log_file_index, dot);
++                    } else {
++                        snprintf(template_with_idx, sizeof(template_with_idx), "%s-%d.log", 
++                                 current_log_filename_template, current_log_file_index);
++                    }
++                } else {
++                    snprintf(template_with_idx, sizeof(template_with_idx), "%%p-%%t-%d.log", current_log_file_index);
++                }
++                
++                av_bprint_init(&filename, 0, AV_BPRINT_SIZE_AUTOMATIC);
++                expand_filename_template(&filename, template_with_idx, tm);
++                
++                report_file = fopen_utf8(filename.str, "w");
++                av_bprint_finalize(&filename, NULL);
++            }
++        }
++        
++        if (report_file) {
++            fputs(line, report_file);
++            fflush(report_file);
++            if (rotate_log) {
++                current_log_size += len;
++            }
++        }
+     }
+ }
+ 
+@@ -1204,6 +1273,13 @@ int init_report(const char *env, FILE **file)
+         av_free(key);
+     }
+ 
++    if (rotate_log) {
++        current_log_filename_template = av_strdup(av_x_if_null(filename_template, "%p-%t.log"));
++        current_log_start_time = now;
++        current_log_file_index = 0;
++        current_log_size = 0;
++    }
++
+     av_bprint_init(&filename, 0, AV_BPRINT_SIZE_AUTOMATIC);
+     expand_filename_template(&filename,
+                              av_x_if_null(filename_template, "%p-%t.log"), tm);
+diff --git a/fftools/opt_common.h b/fftools/opt_common.h
+index 32d53b59bf..29b8d7851d 100644
+--- a/fftools/opt_common.h
++++ b/fftools/opt_common.h
+@@ -227,6 +227,10 @@ int opt_cpucount(void *optctx, const char *opt, const char *arg);
+     { "cpuflags",     OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT, { .func_arg = opt_cpuflags },     "force specific cpu flags", "flags" },     \
+     { "cpucount",     OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT, { .func_arg = opt_cpucount },     "force specific cpu count", "count" },     \
+     { "hide_banner",  OPT_TYPE_BOOL, OPT_EXPERT,            {&hide_banner},                   "do not show program banner", "hide_banner" }, \
++    { "rotate_log",              OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_log},                   "enable log rotation", "rotate_log" }, \
++    { "rotate_by_period",        OPT_TYPE_INT,  OPT_EXPERT,            {&rotate_by_period},             "rotate log files by period (in seconds)", "seconds" }, \
++    { "rotate_by_date",          OPT_TYPE_BOOL, OPT_EXPERT,            {&rotate_by_date},               "rotate log files daily at midnight", "rotate_by_date" }, \
++    { "rotate_on_filesize_limit",OPT_TYPE_INT64,OPT_EXPERT,            {&rotate_on_filesize_limit},     "rotate log files by filesize limit (in bytes)", "bytes" }, \
+     CMDUTILS_COMMON_OPTIONS_AVDEVICE                                                                                    \
+ 
+ #endif /* FFTOOLS_OPT_COMMON_H */
+diff --git a/tests/rotate_log_harness/harness_runner.py b/tests/rotate_log_harness/harness_runner.py
+new file mode 100755
+index 0000000000..a2b08df50f
+--- /dev/null
++++ b/tests/rotate_log_harness/harness_runner.py
+@@ -0,0 +1,90 @@
++#!/usr/bin/env python3
++import subprocess
++import os
++import glob
++import time
++import argparse
++
++def run_ffmpeg(args, log_env=None):
++    env = os.environ.copy()
++    if log_env:
++        env.update(log_env)
++    
++    cmd = ["../../ffmpeg"] + args
++    print(f"Running: {' '.join(cmd)}")
++    result = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    return result
++
++def test_filesize_limit():
++    print("=== Testing filesize limit ===")
++    os.makedirs("test_logs", exist_ok=True)
++    for f in glob.glob("test_logs/*.log"):
++        os.remove(f)
++
++    # We need a long enough process with enough logs.
++    env = {"FFREPORT": "file=test_logs/ffreport-%p-%t.log:level=48"} 
++
++    args = [
++        "-rotate_log", 
++        "-rotate_on_filesize_limit", "1000",
++        "-f", "lavfi", "-i", "testsrc=duration=5", 
++        "-f", "null", "-"
++    ]
++    
++    run_ffmpeg(args, env)
++    
++    logs = glob.glob("test_logs/*.log")
++    print(f"Generated {len(logs)} logs.")
++    success = False
++    for log in logs:
++        size = os.path.getsize(log)
++        print(f" - {log}: {size} bytes")
++        if size > 11000:
++            print(f"FAIL: Log file {log} exceeded limit by a lot!")
++            return False
++            
++    if len(logs) > 1:
++        print("SUCCESS: Log rotation by size works.")
++        success = True
++    else:
++        print("FAIL: No rotation occurred. Maybe limit is too high or logs are too few.")
++        success = False
++    return success
++
++def test_period_limit():
++    print("=== Testing period limit ===")
++    os.makedirs("test_logs", exist_ok=True)
++    for f in glob.glob("test_logs/*.log"):
++        os.remove(f)
++
++    env = {"FFREPORT": "file=test_logs/ffreport-%p-%t.log:level=48"}
++
++    # Use -re so it processes in real-time
++    args = [
++        "-re",
++        "-rotate_log", 
++        "-rotate_by_period", "2",
++        "-f", "lavfi", "-i", "testsrc=duration=6", 
++        "-f", "null", "-"
++    ]
++    
++    run_ffmpeg(args, env)
++    
++    logs = glob.glob("test_logs/*.log")
++    print(f"Generated {len(logs)} logs.")
++    if len(logs) >= 3:
++        print("SUCCESS: Log rotation by period works.")
++        return True
++    else:
++        print("FAIL: Expected at least 3 log files.")
++        return False
++
++if __name__ == "__main__":
++    os.chdir(os.path.dirname(os.path.abspath(__file__)))
++        
++    s1 = test_filesize_limit()
++    print("")
++    s2 = test_period_limit()
++    
++    if not (s1 and s2):
++        exit(1)
+diff --git a/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132555.log b/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132555.log
+new file mode 100644
+index 0000000000..9a5b3e07ca
+--- /dev/null
++++ b/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132555.log
+@@ -0,0 +1,66 @@
++ffmpeg started on 2026-07-03 at 13:25:55
++Report written to "test_logs/ffreport-ffmpeg-20260703-132555.log"
++Log level: 48
++Command line:
++../../ffmpeg -re -rotate_log -rotate_by_period 2 -f lavfi -i "testsrc=duration=6" -f null -
++ffmpeg version git-2026-07-02-1836ef9684 Copyright (c) 2000-2026 the FFmpeg developers
++  built with Apple clang version 17.0.0 (clang-1700.6.3.2)
++  configuration: --disable-x86asm
++  libavutil      61.  2.100 / 61.  2.100
++  libavcodec     63.  3.100 / 63.  3.100
++  libavformat    63.  3.100 / 63.  3.100
++  libavdevice    63.  2.100 / 63.  2.100
++  libavfilter    12.  2.100 / 12.  2.100
++  libswscale     10.  2.100 / 10.  2.100
++  libswresample   7.  2.100 /  7.  2.100
++Splitting the commandline.
++Reading option '-re' ... matched as option 're' (read input at native frame rate; equivalent to -readrate 1) with argument '1'.
++Reading option '-rotate_log' ... matched as option 'rotate_log' (enable log rotation) with argument '1'.
++Reading option '-rotate_by_period' ... matched as option 'rotate_by_period' (rotate log files by period (in seconds)) with argument '2'.
++Reading option '-f' ... matched as option 'f' (force container format (auto-detected otherwise)) with argument 'lavfi'.
++Reading option '-i' ... matched as input url with argument 'testsrc=duration=6'.
++Reading option '-f' ... matched as option 'f' (force container format (auto-detected otherwise)) with argument 'null'.
++Reading option '-' ... matched as output url.
++Finished splitting the commandline.
++Parsing a group of options: global .
++Applying option rotate_log (enable log rotation) with argument 1.
++Applying option rotate_by_period (rotate log files by period (in seconds)) with argument 2.
++Successfully parsed a group of options.
++Parsing a group of options: input url testsrc=duration=6.
++Applying option re (read input at native frame rate; equivalent to -readrate 1) with argument 1.
++Applying option f (force container format (auto-detected otherwise)) with argument lavfi.
++Successfully parsed a group of options.
++Opening an input file: testsrc=duration=6.
++[AVFilterGraph @ 0x13cf04ce0] Setting 'duration' to value '6'
++detected 11 logical cores
++[Parsed_testsrc_0 @ 0x13cf04f10] size:320x240 rate:25/1 duration:6.000000 sar:1/1
++[AVFilterGraph @ 0x13cf04ce0] query_formats: 2 queried, 4 merged, 0 already done, 0 delayed
++[in#0/lavfi @ 0x13cf04800] All info found
++Input #0, lavfi, from 'testsrc=duration=6':
++  Duration: N/A, start: 0.000000, bitrate: N/A
++  Stream #0:0, 1, 1/25: Video: wrapped_avframe, rgb24, 320x240 [SAR 1:1 DAR 4:3], 25 fps, 25 tbr, 25 tbn
++Successfully opened the file.
++Parsing a group of options: output url -.
++Applying option f (force container format (auto-detected otherwise)) with argument null.
++Successfully parsed a group of options.
++Opening an output file: -.
++[out#0/null @ 0x13e004730] No explicit maps, mapping streams automatically...
++[vost#0:0/wrapped_avframe @ 0x13e0053c0] Created video stream from input stream 0:0
++Successfully opened the file.
++Stream mapping:
++  Stream #0:0 -> #0:0 (wrapped_avframe (native) -> wrapped_avframe (native))
++[vost#0:0/wrapped_avframe @ 0x13e0053c0] Starting thread...
++[vf#0:0 @ 0x12d008200] Starting thread...
++[vist#0:0/wrapped_avframe @ 0x13e0045c0] [dec:wrapped_avframe @ 0x13e006460] Starting thread...
++[in#0/lavfi @ 0x13cf04580] Starting thread...
++Press [q] to stop, [?] for help
++[graph -1 input from stream 0:0 @ 0x13cf059c0] w:320 h:240 pixfmt:rgb24 tb:1/25 fr:25/1 sar:1/1 csp:gbr range:pc alpha:unspecified
++[AVFilterGraph @ 0x13cf06040] query_formats: 3 queried, 8 merged, 0 already done, 0 delayed
++Output #0, null, to 'pipe:':
++  Metadata:
++    encoder         : Lavf63.3.100
++  Stream #0:0, 0, 1/25: Video: wrapped_avframe, rgb24(pc, gbr/unknown/unknown, progressive), 320x240 [SAR 1:1 DAR 4:3], q=2-31, 200 kb/s, 25 fps, 25 tbn
++    Metadata:
++      encoder         : Lavc63.3.100 wrapped_avframe
++[out#0/null @ 0x13e004730] Starting thread...
++frame=   25 fps=0.0 q=-0.0 size=N/A time=00:00:01.00 bitrate=N/A speed=1.98x elapsed=0:00:00.50    frame=   38 fps= 38 q=-0.0 size=N/A time=00:00:01.52 bitrate=N/A speed=1.51x elapsed=0:00:01.00    frame=   51 fps= 34 q=-0.0 size=N/A time=00:00:02.04 bitrate=N/A speed=1.35x elapsed=0:00:01.51    
+\ No newline at end of file
+diff --git a/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132557-1.log b/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132557-1.log
+new file mode 100644
+index 0000000000..f5194fb11a
+--- /dev/null
++++ b/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132557-1.log
+@@ -0,0 +1 @@
++frame=   63 fps= 31 q=-0.0 size=N/A time=00:00:02.52 bitrate=N/A speed=1.25x elapsed=0:00:02.01    frame=   76 fps= 30 q=-0.0 size=N/A time=00:00:03.04 bitrate=N/A speed=1.21x elapsed=0:00:02.51    frame=   88 fps= 29 q=-0.0 size=N/A time=00:00:03.52 bitrate=N/A speed=1.17x elapsed=0:00:03.02    frame=  101 fps= 29 q=-0.0 size=N/A time=00:00:04.04 bitrate=N/A speed=1.15x elapsed=0:00:03.52    
+\ No newline at end of file
+diff --git a/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132559-2.log b/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132559-2.log
+new file mode 100644
+index 0000000000..6826a0f087
+--- /dev/null
++++ b/tests/rotate_log_harness/test_logs/ffreport-ffmpeg-20260703-132559-2.log
+@@ -0,0 +1,23 @@
++frame=  114 fps= 28 q=-0.0 size=N/A time=00:00:04.56 bitrate=N/A speed=1.13x elapsed=0:00:04.03    frame=  126 fps= 28 q=-0.0 size=N/A time=00:00:05.04 bitrate=N/A speed=1.11x elapsed=0:00:04.53    frame=  139 fps= 28 q=-0.0 size=N/A time=00:00:05.56 bitrate=N/A speed= 1.1x elapsed=0:00:05.03    [in#0/lavfi @ 0x13cf04580] EOF while reading input
++[in#0/lavfi @ 0x13cf04580] Terminating thread with return code 0 (success)
++[vist#0:0/wrapped_avframe @ 0x13e0045c0] [dec:wrapped_avframe @ 0x13e006460] Decoder thread received EOF packet
++[vist#0:0/wrapped_avframe @ 0x13e0045c0] [dec:wrapped_avframe @ 0x13e006460] Decoder returned EOF, finishing
++[vist#0:0/wrapped_avframe @ 0x13e0045c0] [dec:wrapped_avframe @ 0x13e006460] Terminating thread with return code 0 (success)
++[out_#0:0 @ 0x13cf062b0] EOF on sink link out_#0:0:default.
++[vf#0:0 @ 0x12d008200] Filtergraph returned EOF, finishing
++[vf#0:0 @ 0x12d008200] All consumers returned EOF
++[vost#0:0/wrapped_avframe @ 0x13e0053c0] [enc:wrapped_avframe @ 0x13e005b20] Encoder thread received EOF
++[vost#0:0/wrapped_avframe @ 0x13e0053c0] Terminating thread with return code 0 (success)
++[out#0/null @ 0x13e004730] All streams finished
++[out#0/null @ 0x13e004730] Terminating thread with return code 0 (success)
++[vf#0:0 @ 0x12d008200] Terminating thread with return code 0 (success)
++[out#0/null @ 0x13e004730] Output file #0 (pipe:):
++[out#0/null @ 0x13e004730]   Output stream #0:0 (video): 150 frames encoded; 150 packets muxed (63600 bytes); 
++[out#0/null @ 0x13e004730]   Total: 150 packets (63600 bytes) muxed
++[out#0/null @ 0x13e004730] video:62KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
++frame=  150 fps= 27 q=-0.0 Lsize=N/A time=00:00:06.00 bitrate=N/A speed= 1.1x elapsed=0:00:05.46    
++[in#0/lavfi @ 0x13cf04580] Input file #0 (testsrc=duration=6):
++[in#0/lavfi @ 0x13cf04580]   Input stream #0:0 (video): 150 packets read (63600 bytes); 150 frames decoded; 0 decode errors; 
++[in#0/lavfi @ 0x13cf04580]   Total: 150 packets (63600 bytes) demuxed
++
++Exiting with exit code 0
+-- 
+2.50.1 (Apple Git-155)
+
